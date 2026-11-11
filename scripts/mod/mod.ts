@@ -217,11 +217,35 @@ function extractApp(zip: string, outDir: string) {
   return NodePath.join(outDir, app);
 }
 
-// Only the bundle's file and display name change. Electron finds its helper apps from
-// CFBundleName, and the data folder and keychain item follow the build's branding.
+// Electron finds its helpers as "<CFBundleName> Helper*.app", so they are renamed together.
+// The data folder and keychain item follow the build's branding, so installs keep their data.
 function renameApp(app: string) {
-  const plist = NodePath.join(app, "Contents", "Info.plist");
-  run("plutil", ["-replace", "CFBundleDisplayName", "-string", APP_NAME, plist]);
+  const contents = NodePath.join(app, "Contents");
+  const setNames = (plist: string, name: string) => {
+    run("plutil", ["-replace", "CFBundleName", "-string", name, plist]);
+    run("plutil", ["-replace", "CFBundleDisplayName", "-string", name, plist]);
+  };
+  const mainPlist = NodePath.join(contents, "Info.plist");
+  const builtName = run("plutil", ["-extract", "CFBundleName", "raw", mainPlist]);
+  setNames(mainPlist, APP_NAME);
+  const frameworks = NodePath.join(contents, "Frameworks");
+  for (const helper of NodeFS.readdirSync(frameworks)) {
+    if (!helper.startsWith(`${builtName} Helper`) || !helper.endsWith(".app")) continue;
+    const helperName = helper.slice(0, -".app".length);
+    const renamedHelper = `${APP_NAME}${helperName.slice(builtName.length)}`;
+    const helperContents = NodePath.join(frameworks, helper, "Contents");
+    NodeFS.renameSync(
+      NodePath.join(helperContents, "MacOS", helperName),
+      NodePath.join(helperContents, "MacOS", renamedHelper),
+    );
+    const helperPlist = NodePath.join(helperContents, "Info.plist");
+    run("plutil", ["-replace", "CFBundleExecutable", "-string", renamedHelper, helperPlist]);
+    setNames(helperPlist, renamedHelper);
+    NodeFS.renameSync(
+      NodePath.join(frameworks, helper),
+      NodePath.join(frameworks, `${renamedHelper}.app`),
+    );
+  }
   const renamed = NodePath.join(NodePath.dirname(app), `${APP_NAME}.app`);
   NodeFS.renameSync(app, renamed);
   return renamed;
