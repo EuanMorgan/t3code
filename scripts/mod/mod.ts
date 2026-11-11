@@ -217,11 +217,10 @@ function extractApp(zip: string, outDir: string) {
   return NodePath.join(outDir, app);
 }
 
-// Only the Finder and Dock name changes. The data folder and keychain item follow the build's
-// branding, so renaming here keeps every install's data.
+// Only the bundle's file and display name change. Electron finds its helper apps from
+// CFBundleName, and the data folder and keychain item follow the build's branding.
 function renameApp(app: string) {
   const plist = NodePath.join(app, "Contents", "Info.plist");
-  run("plutil", ["-replace", "CFBundleName", "-string", APP_NAME, plist]);
   run("plutil", ["-replace", "CFBundleDisplayName", "-string", APP_NAME, plist]);
   const renamed = NodePath.join(NodePath.dirname(app), `${APP_NAME}.app`);
   NodeFS.renameSync(app, renamed);
