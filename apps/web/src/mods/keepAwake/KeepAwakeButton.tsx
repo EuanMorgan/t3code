@@ -125,6 +125,7 @@ export function KeepAwakeButton({ onBackdrop }: { readonly onBackdrop: boolean }
           <MenuCheckboxItem
             checked={keepScreenOn}
             onCheckedChange={(checked) => send({ keepScreenOn: Boolean(checked) })}
+            variant="switch"
           >
             Keep screen on
           </MenuCheckboxItem>
