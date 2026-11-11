@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off - runs before `vp i` in the build checkout, so only Node built-ins exist.
+// @effect-diagnostics nodeBuiltinImport:off globalConsole:off globalDate:off extendsNativeError:off - runs before `vp i` in the build checkout, so only Node built-ins exist.
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
@@ -159,7 +159,7 @@ function setupSigning(paths: ModPaths) {
   console.log(`Created the signing keychain in ${dir}. Back this folder up.`);
 }
 
-export async function signApp(paths: ModPaths, app: string) {
+async function signApp(paths: ModPaths, app: string) {
   const identity = NodeFS.readFileSync(paths.identity, "utf8").trim();
   run("security", [
     "unlock-keychain",
@@ -183,7 +183,7 @@ export async function signApp(paths: ModPaths, app: string) {
   }
 }
 
-export function packageUpdate(app: string, version: string, outDir: string) {
+function packageUpdate(app: string, version: string, outDir: string) {
   NodeFS.mkdirSync(outDir, { recursive: true });
   const zipName = `T3-Code-${version}-arm64.zip`;
   const zip = NodePath.join(outDir, zipName);
@@ -208,7 +208,7 @@ export function packageUpdate(app: string, version: string, outDir: string) {
   return [zip, manifest];
 }
 
-export function extractApp(zip: string, outDir: string) {
+function extractApp(zip: string, outDir: string) {
   NodeFS.rmSync(outDir, { recursive: true, force: true });
   run("ditto", ["-x", "-k", zip, outDir]);
   const app = NodeFS.readdirSync(outDir).find((entry) => entry.endsWith(".app"));
@@ -216,14 +216,14 @@ export function extractApp(zip: string, outDir: string) {
   return NodePath.join(outDir, app);
 }
 
-export function githubRepository(checkout: string) {
+function githubRepository(checkout: string) {
   const url = git(checkout, "remote", "get-url", "origin");
   const match = /[:/]([^/:]+\/[^/]+?)(?:\.git)?$/.exec(url);
   if (!match?.[1]) throw new Error(`Cannot read owner/repo from origin ${url}.`);
   return match[1];
 }
 
-export function githubToken(repository: string) {
+function githubToken(repository: string) {
   try {
     return run("gh", ["auth", "token", "--user", repository.split("/")[0]!]);
   } catch {
@@ -231,7 +231,7 @@ export function githubToken(repository: string) {
   }
 }
 
-export function nightlyRelease(checkout: string, sha: string, now = new Date()) {
+function nightlyRelease(checkout: string, sha: string, now = new Date()) {
   const iso = now.toISOString();
   const date = iso.slice(0, 10).replaceAll("-", "");
   // Upstream run numbers are in the thousands; a leading 1 keeps these above them and
@@ -250,7 +250,12 @@ export function nightlyRelease(checkout: string, sha: string, now = new Date()) 
   return { version: fields.version!, tag: fields.tag!, name: fields.name! };
 }
 
-export function buildApp(input: {
+function installDependencies(checkout: string, logFd: number) {
+  NodeFS.copyFileSync(NodePath.join(checkout, ".env.example"), NodePath.join(checkout, ".env"));
+  run("vp", ["i", "--frozen-lockfile", "--", "--yes"], { cwd: checkout, logFd });
+}
+
+function buildApp(input: {
   readonly checkout: string;
   readonly version: string;
   readonly repository: string;
@@ -263,14 +268,9 @@ export function buildApp(input: {
     T3CODE_DESKTOP_UPDATE_REPOSITORY: input.repository,
   };
   const options = { cwd: input.checkout, env, logFd: input.logFd };
-  NodeFS.copyFileSync(
-    NodePath.join(input.checkout, ".env.example"),
-    NodePath.join(input.checkout, ".env"),
-  );
-  run("vp", ["i", "--frozen-lockfile", "--", "--yes"], options);
-  run(process.execPath, ["scripts/update-release-package-versions.ts", input.version], options);
   NodeFS.rmSync(input.outDir, { recursive: true, force: true });
   try {
+    run(process.execPath, ["scripts/update-release-package-versions.ts", input.version], options);
     run(
       process.execPath,
       [
@@ -296,7 +296,7 @@ export function buildApp(input: {
   return NodePath.join(input.outDir, zip);
 }
 
-export function publishRelease(input: {
+function publishRelease(input: {
   readonly repository: string;
   readonly release: ReturnType<typeof nightlyRelease>;
   readonly target: string;
@@ -416,6 +416,8 @@ async function update(paths: ModPaths, flags: { force: boolean; push: boolean })
       }
     }
 
+    step("Installing dependencies");
+    installDependencies(checkout, logFd);
     const repository = githubRepository(checkout);
     const release = nightlyRelease(checkout, head);
     step(`Building ${release.version} for ${repository} (log: ${logPath})`);
@@ -436,7 +438,7 @@ async function update(paths: ModPaths, flags: { force: boolean; push: boolean })
     publishRelease({
       repository,
       release,
-      target: flags.push ? head : origin,
+      target: head,
       notes: `Upstream ${upstream.slice(0, 12)} with these mods:\n\n${mods || "- none"}`,
       files,
     });
