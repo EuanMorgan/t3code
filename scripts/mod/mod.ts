@@ -7,6 +7,7 @@ import * as NodePath from "node:path";
 
 const SCHEDULE_LABEL = "com.t3code.mod-update";
 const SCHEDULE_HOUR = 3;
+const APP_NAME = "E3 Code";
 
 function run(command: string, args: ReadonlyArray<string>, options: RunOptions = {}): string {
   const result = NodeChildProcess.spawnSync(command, args, {
@@ -185,7 +186,7 @@ async function signApp(paths: ModPaths, app: string) {
 
 function packageUpdate(app: string, version: string, outDir: string) {
   NodeFS.mkdirSync(outDir, { recursive: true });
-  const zipName = `T3-Code-${version}-arm64.zip`;
+  const zipName = `${APP_NAME.replaceAll(" ", "-")}-${version}-arm64.zip`;
   const zip = NodePath.join(outDir, zipName);
   run("ditto", ["-c", "-k", "--sequesterRsrc", "--keepParent", app, zip]);
   const bytes = NodeFS.readFileSync(zip);
@@ -214,6 +215,17 @@ function extractApp(zip: string, outDir: string) {
   const app = NodeFS.readdirSync(outDir).find((entry) => entry.endsWith(".app"));
   if (!app) throw new Error(`${zip} holds no .app bundle.`);
   return NodePath.join(outDir, app);
+}
+
+// Only the Finder and Dock name changes. The data folder and keychain item follow the build's
+// branding, so renaming here keeps every install's data.
+function renameApp(app: string) {
+  const plist = NodePath.join(app, "Contents", "Info.plist");
+  run("plutil", ["-replace", "CFBundleName", "-string", APP_NAME, plist]);
+  run("plutil", ["-replace", "CFBundleDisplayName", "-string", APP_NAME, plist]);
+  const renamed = NodePath.join(NodePath.dirname(app), `${APP_NAME}.app`);
+  NodeFS.renameSync(app, renamed);
+  return renamed;
 }
 
 function githubRepository(checkout: string) {
@@ -367,7 +379,10 @@ function rebaseOntoUpstream(checkout: string, commitCount: number) {
   throw new Error("The rebase onto upstream/main kept stopping without a conflict.");
 }
 
-async function update(paths: ModPaths, flags: { force: boolean; push: boolean }) {
+async function update(
+  paths: ModPaths,
+  flags: { force: boolean; push: boolean; branch: string },
+) {
   ensureCheckout(paths);
   NodeFS.mkdirSync(paths.logs, { recursive: true });
   const logPath = NodePath.join(paths.logs, `${new Date().toISOString().replaceAll(":", "-")}.log`);
@@ -382,7 +397,7 @@ async function update(paths: ModPaths, flags: { force: boolean; push: boolean })
     git(checkout, "fetch", "upstream");
     git(checkout, "fetch", "origin");
     const upstream = git(checkout, "rev-parse", "upstream/main");
-    const origin = git(checkout, "rev-parse", "origin/main");
+    const origin = git(checkout, "rev-parse", `origin/${flags.branch}`);
     const last = NodeFS.existsSync(paths.lastPublished)
       ? (JSON.parse(NodeFS.readFileSync(paths.lastPublished, "utf8")) as {
           upstream: string;
@@ -394,7 +409,7 @@ async function update(paths: ModPaths, flags: { force: boolean; push: boolean })
       return;
     }
 
-    step("Rebasing origin/main onto upstream/main");
+    step(`Rebasing origin/${flags.branch} onto upstream/main`);
     git(checkout, "reset", "--hard");
     git(checkout, "clean", "-fd");
     git(checkout, "checkout", "--detach", origin);
@@ -403,16 +418,16 @@ async function update(paths: ModPaths, flags: { force: boolean; push: boolean })
     const head = git(checkout, "rev-parse", "HEAD");
     if (head !== origin) {
       if (flags.push) {
-        step(`Pushing ${head.slice(0, 12)} to origin/main`);
+        step(`Pushing ${head.slice(0, 12)} to origin/${flags.branch}`);
         git(
           checkout,
           "push",
-          `--force-with-lease=main:${origin}`,
+          `--force-with-lease=${flags.branch}:${origin}`,
           "origin",
-          "HEAD:refs/heads/main",
+          `HEAD:refs/heads/${flags.branch}`,
         );
       } else {
-        step(`Leaving origin/main at ${origin.slice(0, 12)} (--no-push)`);
+        step(`Leaving origin/${flags.branch} at ${origin.slice(0, 12)} (--no-push)`);
       }
     }
 
@@ -429,7 +444,7 @@ async function update(paths: ModPaths, flags: { force: boolean; push: boolean })
       logFd,
     });
     step("Signing");
-    const app = extractApp(zip, NodePath.join(paths.release, "app"));
+    const app = renameApp(extractApp(zip, NodePath.join(paths.release, "app")));
     await signApp(paths, app);
     const files = packageUpdate(app, release.version, paths.release);
 
@@ -520,9 +535,14 @@ if (import.meta.main) {
   if (command === "setup-signing") setupSigning(paths);
   else if (command === "install-schedule") installSchedule(paths);
   else if (command === "update") {
-    await update(paths, { force: flags.includes("--force"), push: !flags.includes("--no-push") });
+    const branchFlag = flags.indexOf("--branch");
+    await update(paths, {
+      force: flags.includes("--force"),
+      push: !flags.includes("--no-push"),
+      branch: branchFlag === -1 ? "main" : (flags[branchFlag + 1] ?? "main"),
+    });
   } else {
-    console.error("Usage: mod.ts setup-signing | update [--force] [--no-push] | install-schedule");
+    console.error("Usage: mod.ts setup-signing | update [--force] [--no-push] [--branch <name>] | install-schedule");
     process.exitCode = 2;
   }
 }
