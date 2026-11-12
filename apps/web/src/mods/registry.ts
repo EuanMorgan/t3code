@@ -9,6 +9,7 @@ export interface WebMod {
   readonly name: string;
   readonly description: string;
   readonly SidebarHeaderItem?: ComponentType<{ readonly onBackdrop: boolean }>;
+  readonly SidebarFooterItem?: ComponentType;
   readonly onDisable?: (registry: AtomRegistry.AtomRegistry) => void;
 }
 
