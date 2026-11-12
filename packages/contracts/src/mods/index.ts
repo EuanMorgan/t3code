@@ -4,11 +4,25 @@ import {
   KeepAwakeSetRpc,
   KeepAwakeSubscribeRpc,
 } from "./keepAwake.ts";
+import {
+  SPOTIFY_METHODS,
+  SPOTIFY_RPC_SCOPES,
+  SpotifyControlRpc,
+  SpotifySubscribeRpc,
+} from "./spotify.ts";
 
 export * from "./keepAwake.ts";
+export * from "./spotify.ts";
 
-export const MOD_RPCS = [KeepAwakeSetRpc, KeepAwakeSubscribeRpc] as const;
+export const MOD_RPCS = [
+  KeepAwakeSetRpc,
+  KeepAwakeSubscribeRpc,
+  SpotifyControlRpc,
+  SpotifySubscribeRpc,
+] as const;
 
-export const MOD_RPC_SCOPES = { ...KEEP_AWAKE_RPC_SCOPES } as const;
+export const MOD_RPC_SCOPES = { ...KEEP_AWAKE_RPC_SCOPES, ...SPOTIFY_RPC_SCOPES } as const;
 
-export type ModSubscriptionRpcTag = typeof KEEP_AWAKE_METHODS.subscribe;
+export type ModSubscriptionRpcTag =
+  | typeof KEEP_AWAKE_METHODS.subscribe
+  | typeof SPOTIFY_METHODS.subscribe;
