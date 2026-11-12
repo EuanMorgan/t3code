@@ -4,7 +4,11 @@ import { useContext } from "react";
 
 import type { CommandPaletteActionItem } from "../components/CommandPalette.logic";
 
-import { SettingsRow, SettingsSection } from "../components/settings/settingsLayout";
+import {
+  SettingsPageContainer,
+  SettingsRow,
+  SettingsSection,
+} from "../components/settings/settingsLayout";
 import { Switch } from "../components/ui/switch";
 import { KeepAwakeButton } from "./keepAwake/KeepAwakeButton";
 import { turnKeepAwakeOff } from "./keepAwake/state";
@@ -45,28 +49,30 @@ export function ModSidebarHeaderSlot({ onBackdrop }: { readonly onBackdrop: bool
   );
 }
 
-export function ModsSettingsSection() {
+export function ModsSettingsPanel() {
   const { isEnabled, setEnabled } = useModsEnabled();
   const registry = useContext(RegistryContext);
   return (
-    <SettingsSection id="plugins" title="Plugins">
-      {MODS.map((mod) => (
-        <SettingsRow
-          key={mod.id}
-          title={mod.name}
-          description={mod.description}
-          control={
-            <Switch
-              aria-label={mod.name}
-              checked={isEnabled(mod.id)}
-              onCheckedChange={(checked) => {
-                setEnabled(mod.id, checked);
-                if (!checked) mod.onDisable?.(registry);
-              }}
-            />
-          }
-        />
-      ))}
-    </SettingsSection>
+    <SettingsPageContainer>
+      <SettingsSection id="plugins" title="Plugins">
+        {MODS.map((mod) => (
+          <SettingsRow
+            key={mod.id}
+            title={mod.name}
+            description={mod.description}
+            control={
+              <Switch
+                aria-label={mod.name}
+                checked={isEnabled(mod.id)}
+                onCheckedChange={(checked) => {
+                  setEnabled(mod.id, checked);
+                  if (!checked) mod.onDisable?.(registry);
+                }}
+              />
+            }
+          />
+        ))}
+      </SettingsSection>
+    </SettingsPageContainer>
   );
 }
