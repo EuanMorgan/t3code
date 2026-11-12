@@ -13,6 +13,7 @@ import { Switch } from "../components/ui/switch";
 import { KeepAwakeButton } from "./keepAwake/KeepAwakeButton";
 import { turnKeepAwakeOff } from "./keepAwake/state";
 import { useRefreshSkillsAction } from "./refreshSkills/useRefreshSkillsAction";
+import { SpotifyNowPlaying } from "./spotify/SpotifyNowPlaying";
 import { useModsEnabled, type WebMod } from "./registry";
 
 const MODS: ReadonlyArray<WebMod> = [
@@ -30,6 +31,13 @@ const MODS: ReadonlyArray<WebMod> = [
     description:
       "A command palette action that rescans the open thread's skills without restarting the agent.",
   },
+  {
+    id: "spotify",
+    name: "Spotify",
+    description:
+      "Shows the song playing in Spotify on the Mac running T3 Code at the bottom of the sidebar, with play, pause and skip buttons.",
+    SidebarFooterItem: SpotifyNowPlaying,
+  },
 ];
 
 export function useModCommandPaletteActions(
@@ -46,6 +54,13 @@ export function ModSidebarHeaderSlot({ onBackdrop }: { readonly onBackdrop: bool
     SidebarHeaderItem !== undefined && isEnabled(id) ? (
       <SidebarHeaderItem key={id} onBackdrop={onBackdrop} />
     ) : null,
+  );
+}
+
+export function ModSidebarFooterSlot() {
+  const { isEnabled } = useModsEnabled();
+  return MODS.map(({ id, SidebarFooterItem }) =>
+    SidebarFooterItem !== undefined && isEnabled(id) ? <SidebarFooterItem key={id} /> : null,
   );
 }
 
