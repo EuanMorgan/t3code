@@ -294,6 +294,7 @@ import { readPullRequestListPreferences } from "~/components/pullRequest/pullReq
 import { readIssueListPreferences } from "~/components/issue/issueListPreferences";
 import { IssueGlyph } from "~/components/issue/issuePresentation";
 import { useThreadRouteTarget } from "../hooks/useThreadRouteTarget";
+import { useModCommandPaletteActions } from "~/mods";
 import { threadRecentUse } from "@t3tools/shared/paletteSearch";
 
 const EMPTY_BROWSE_ENTRIES: FilesystemBrowseResult["entries"] = [];
@@ -511,6 +512,7 @@ function OpenCommandPaletteDialog(props: {
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
     useHandleNewThread();
   const paletteRouteTarget = useThreadRouteTarget();
+  const modActionItems = useModCommandPaletteActions(activeThread);
   const projects = useProjects();
   const referenceThreadRef =
     pathname === "/pull-requests"
@@ -1871,6 +1873,7 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
+  actionItems.push(...modActionItems);
   const rootGroups = buildRootGroups({ actionItems, recentThreadItems }, messages);
   // Every setting goes to the palette's own matcher, so settings get the same
   // word starts and typo tolerance as threads.
