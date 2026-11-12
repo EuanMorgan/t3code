@@ -37,6 +37,7 @@ export type SettingsPath =
   | "/settings/access"
   | "/settings/secrets"
   | "/settings/maintenance"
+  | "/settings/plugins"
   | "/settings/labs"
   | "/settings/about"
   | "/settings/archived";
@@ -112,6 +113,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/access": msg("Sharing & access"),
   "/settings/secrets": msg("Secrets"),
   "/settings/maintenance": msg("Maintenance"),
+  "/settings/plugins": msg("Plugins"),
   "/settings/labs": msg("Labs"),
   "/settings/about": msg("About"),
   "/settings/voice": msg("Voice"),
@@ -162,7 +164,13 @@ export const SETTINGS_NAV_GROUPS: ReadonlyArray<{
   {
     heading: msg("More"),
     headingHidden: true,
-    paths: ["/settings/maintenance", "/settings/labs", "/settings/about", "/settings/archived"],
+    paths: [
+      "/settings/plugins",
+      "/settings/maintenance",
+      "/settings/labs",
+      "/settings/about",
+      "/settings/archived",
+    ],
   },
 ];
 
@@ -1396,6 +1404,7 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/secrets": null,
   "/settings/scheduled-tasks": null,
   "/settings/maintenance": null,
+  "/settings/plugins": null,
   "/settings/labs": null,
   "/settings/about": null,
   "/settings/archived": "project-defaults",
