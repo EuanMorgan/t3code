@@ -402,10 +402,7 @@ function rebaseOntoUpstream(checkout: string, commitCount: number) {
   throw new Error("The rebase onto upstream/main kept stopping without a conflict.");
 }
 
-async function update(
-  paths: ModPaths,
-  flags: { force: boolean; push: boolean; branch: string },
-) {
+async function update(paths: ModPaths, flags: { force: boolean; push: boolean; branch: string }) {
   ensureCheckout(paths);
   NodeFS.mkdirSync(paths.logs, { recursive: true });
   const logPath = NodePath.join(paths.logs, `${new Date().toISOString().replaceAll(":", "-")}.log`);
@@ -565,7 +562,9 @@ if (import.meta.main) {
       branch: branchFlag === -1 ? "main" : (flags[branchFlag + 1] ?? "main"),
     });
   } else {
-    console.error("Usage: mod.ts setup-signing | update [--force] [--no-push] [--branch <name>] | install-schedule");
+    console.error(
+      "Usage: mod.ts setup-signing | update [--force] [--no-push] [--branch <name>] | install-schedule",
+    );
     process.exitCode = 2;
   }
 }
