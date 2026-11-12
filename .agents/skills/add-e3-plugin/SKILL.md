@@ -15,7 +15,7 @@ E3 Code is this fork's build of T3 Code. A nightly job rebases the fork's `main`
 | Wire types | `packages/contracts/src/mods/<id>.ts` | `packages/contracts/src/mods/index.ts`                     |
 | Server     | `apps/server/src/mods/<id>/`          | `apps/server/src/mods/index.ts`                            |
 
-`keepAwake` uses all three parts and `refreshSkills` uses only the UI part. Copy the closer one.
+`keepAwake` and `spotify` use all three parts and `refreshSkills` uses only the UI part. Copy the closest one.
 
 ## Steps
 
@@ -23,6 +23,7 @@ E3 Code is this fork's build of T3 Code. A nightly job rebases the fork's `main`
 2. Add a `MODS` entry with `id`, `name` and `description`. It gets an on/off switch on **Settings → Plugins** with no further work. Plugins are on until switched off. Read the switch with `useModsEnabled().isEnabled(id)`.
 3. Attach the UI to an existing slot:
    - **Sidebar header button:** set `SidebarHeaderItem` on the `MODS` entry.
+   - **Sidebar footer card:** set `SidebarFooterItem` on the `MODS` entry. It sits above Settings at the bottom of the sidebar.
    - **Command palette action:** write a hook that returns a `CommandPaletteActionItem` or `null`, call it in `useModCommandPaletteActions`, and include its item only while `isEnabled(id)`. Give the item a `value` starting with `action:mods:`.
    - **Clean up when switched off:** set `onDisable`.
 4. If the plugin needs the server:
