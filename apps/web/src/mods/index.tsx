@@ -1,10 +1,14 @@
 import { RegistryContext } from "@effect/atom-react";
+import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { useContext } from "react";
+
+import type { CommandPaletteActionItem } from "../components/CommandPalette.logic";
 
 import { SettingsRow, SettingsSection } from "../components/settings/settingsLayout";
 import { Switch } from "../components/ui/switch";
 import { KeepAwakeButton } from "./keepAwake/KeepAwakeButton";
 import { turnKeepAwakeOff } from "./keepAwake/state";
+import { useRefreshSkillsAction } from "./refreshSkills/useRefreshSkillsAction";
 import { useModsEnabled, type WebMod } from "./registry";
 
 const MODS: ReadonlyArray<WebMod> = [
@@ -16,7 +20,21 @@ const MODS: ReadonlyArray<WebMod> = [
     SidebarHeaderItem: KeepAwakeButton,
     onDisable: turnKeepAwakeOff,
   },
+  {
+    id: "refreshSkills",
+    name: "Refresh skills",
+    description:
+      "A command palette action that rescans the open thread's skills without restarting the agent.",
+  },
 ];
+
+export function useModCommandPaletteActions(
+  thread: EnvironmentThreadShell | null,
+): ReadonlyArray<CommandPaletteActionItem> {
+  const { isEnabled } = useModsEnabled();
+  const refreshSkills = useRefreshSkillsAction(thread);
+  return refreshSkills !== null && isEnabled("refreshSkills") ? [refreshSkills] : [];
+}
 
 export function ModSidebarHeaderSlot({ onBackdrop }: { readonly onBackdrop: boolean }) {
   const { isEnabled } = useModsEnabled();
