@@ -34,5 +34,5 @@ E3 Code is this fork's build of T3 Code. A nightly job rebases the fork's `main`
 ## Finish
 
 1. Run `vp run check:changed`. A user-visible plugin also gets one pass in the real app with `test-t3-app`.
-2. Open a PR into the fork's `main` and merge it once CI is green and the user agrees.
-3. The plugin reaches the installed app with the next build. The nightly job builds at 03:00 when `vp run mod:install-schedule` has been run. To build now, run `vp run mod:update` from the main clone. The app's sidebar then shows its usual update button.
+2. Open a PR into the fork's `main`. The fork's CI never starts, because it needs upstream's Blacksmith runners, so merge on the local checks once the user agrees.
+3. Build and publish the update straight away. The user wants new plugins at once, not with the nightly build. In the background, run `vp run mod:update` from the build checkout, `t3code-mod-build/checkout` beside the main clone, and wait for it. Run only one build at a time. Tell the user when the build is published. The update button then appears in E3 Code's sidebar. If the build fails, its last output names the log.
