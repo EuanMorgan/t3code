@@ -126,7 +126,6 @@ import { downloadLocalUpdate } from "../sidebar/SidebarUpdatePill";
 import { useUpdateEverythingRun } from "../sidebar/updateEverythingRun";
 import { awaitsTrackSwitch, channelSwitchLabel } from "../sidebar/updateEverything.logic";
 import { isHostedByThisApp } from "../sidebar/useUpdateEverything";
-import { ModsSettingsSection } from "~/mods";
 
 const RESPONSE_STREAMING_MODE_LABELS: Record<ResponseStreamingMode, string> = {
   turn: "Wait for the full response",
@@ -1147,7 +1146,6 @@ export function GeneralSettingsPanel() {
           }
         />
       </SettingsSection>
-      <ModsSettingsSection />
     </SettingsPageContainer>
   );
 }
