@@ -32,6 +32,7 @@ import {
   EnvironmentAuthorizationError,
   RpcScopeAuthorization,
   WS_METHODS,
+  MOD_RPC_SCOPES,
   WsRpcGroup,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -44,6 +45,7 @@ type WsRpcMethod = RpcGroup.Rpcs<typeof WsRpcGroup>["_tag"];
 
 export const RPC_REQUIRED_SCOPES = {
   ...CLIENT_GUARDED_RPC_SCOPES,
+  ...MOD_RPC_SCOPES,
   [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: AuthOrchestrationOperateScope,
   [ORCHESTRATION_V2_WS_METHODS.getWorkflowScript]: AuthOrchestrationReadScope,
   [ORCHESTRATION_V2_WS_METHODS.getNativeChildWork]: AuthOrchestrationReadScope,
