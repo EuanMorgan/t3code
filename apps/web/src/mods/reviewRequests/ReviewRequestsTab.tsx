@@ -121,7 +121,7 @@ function ReviewRequestsList({ search }: { search: string }) {
       </div>
       {status.slackError === null ? null : <Notice variant="error">{status.slackError}</Notice>}
       {status.githubError === null ? null : <Notice variant="warning">{status.githubError}</Notice>}
-      {requests.length === 0 ? (
+      {requests.length === 0 && (status.fetchedAt !== null || status.slackError === null) ? (
         <p className="px-3 py-6 text-center text-sm text-muted-foreground">
           {status.fetchedAt === null
             ? "Reading Slack…"
