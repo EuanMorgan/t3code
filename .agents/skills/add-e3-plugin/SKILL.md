@@ -26,6 +26,7 @@ E3 Code is this fork's build of T3 Code. A nightly job rebases the fork's `main`
    - **Sidebar footer card:** set `SidebarFooterItem` on the `MODS` entry. It sits above Settings at the bottom of the sidebar.
    - **Command palette action:** write a hook that returns a `CommandPaletteActionItem` or `null`, call it in `useModCommandPaletteActions`, and include its item only while `isEnabled(id)`. Give the item a `value` starting with `action:mods:`.
    - **Plugin settings:** set `SettingsItem` on the `MODS` entry. It shows under the plugin's switch on **Settings → Plugins** while the plugin is on. Keep secrets such as links and tokens on the server with `ServerSecretStore`, as `calendar` does.
+   - **Pull requests page tab:** `ModPullRequestsListSlot` wraps the page's list with a tab strip. Only Review requests uses it, so it checks that plugin's switch itself.
    - **Clean up when switched off:** set `onDisable`.
 4. If the plugin needs the server:
    - In contracts, define `<ID>_METHODS` named `mods.<id>.<verb>`, its `Rpc.make` definitions and its scopes. Add them to `MOD_RPCS` and `MOD_RPC_SCOPES`, and add any subscription tag to `ModSubscriptionRpcTag`.
