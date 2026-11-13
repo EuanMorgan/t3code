@@ -1,6 +1,6 @@
 import { RegistryContext } from "@effect/atom-react";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
-import { useContext } from "react";
+import { useContext, type ReactNode } from "react";
 
 import type { CommandPaletteActionItem } from "../components/CommandPalette.logic";
 
@@ -15,6 +15,7 @@ import { NextMeetingCard } from "./calendar/NextMeetingCard";
 import { KeepAwakeButton } from "./keepAwake/KeepAwakeButton";
 import { turnKeepAwakeOff } from "./keepAwake/state";
 import { useRefreshSkillsAction } from "./refreshSkills/useRefreshSkillsAction";
+import { ReviewRequestsTabs } from "./reviewRequests/ReviewRequestsTab";
 import { SpotifyNowPlaying } from "./spotify/SpotifyNowPlaying";
 import { useModsEnabled, type WebMod } from "./registry";
 
@@ -48,6 +49,12 @@ const MODS: ReadonlyArray<WebMod> = [
     SidebarFooterItem: NextMeetingCard,
     SettingsItem: CalendarSettings,
   },
+  {
+    id: "reviewRequests",
+    name: "Review requests",
+    description:
+      "A Review requests tab on the Pull requests page that lists the All and Forest pull requests posted in #eng-review-requests, with who is looking at each.",
+  },
 ];
 
 export function useModCommandPaletteActions(
@@ -72,6 +79,17 @@ export function ModSidebarFooterSlot() {
   return MODS.map(({ id, SidebarFooterItem }) =>
     SidebarFooterItem !== undefined && isEnabled(id) ? <SidebarFooterItem key={id} /> : null,
   );
+}
+
+export function ModPullRequestsListSlot({
+  list,
+  search,
+}: {
+  readonly list: ReactNode;
+  readonly search: string;
+}) {
+  const { isEnabled } = useModsEnabled();
+  return isEnabled("reviewRequests") ? <ReviewRequestsTabs list={list} search={search} /> : list;
 }
 
 export function ModsSettingsPanel() {
