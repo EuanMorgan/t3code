@@ -62,7 +62,7 @@ export function KeepAwakeButton({ onBackdrop }: { readonly onBackdrop: boolean }
 
   if (environmentId === null || status === null || !status.supported) return null;
 
-  const { mode, keepScreenOn } = status.state;
+  const { mode, keepScreenOn, lidClosed } = status.state;
   const on = mode._tag !== "Off";
   const description = describeKeepAwake(mode, openedAt);
   const send = (input: KeepAwakeSetInput) => void set({ environmentId, input });
@@ -128,6 +128,13 @@ export function KeepAwakeButton({ onBackdrop }: { readonly onBackdrop: boolean }
             variant="switch"
           >
             Keep screen on
+          </MenuCheckboxItem>
+          <MenuCheckboxItem
+            checked={lidClosed}
+            onCheckedChange={(checked) => send({ lidClosed: Boolean(checked) })}
+            variant="switch"
+          >
+            Keep awake with lid closed
           </MenuCheckboxItem>
           {on ? (
             <>

@@ -1,6 +1,11 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
-import { KeepAwakeUnsupportedError, RuntimeRequestId, ThreadId } from "@t3tools/contracts";
+import {
+  KeepAwakeLidSetupError,
+  KeepAwakeUnsupportedError,
+  RuntimeRequestId,
+  ThreadId,
+} from "@t3tools/contracts";
 import type { KeepAwakeStatus } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as DateTime from "effect/DateTime";
@@ -16,10 +21,12 @@ import * as TestClock from "effect/testing/TestClock";
 import * as AgentWorkSource from "./AgentWorkSource.ts";
 import * as CaffeinateProcess from "./CaffeinateProcess.ts";
 import * as KeepAwake from "./KeepAwake.ts";
+import * as LidSleep from "./LidSleep.ts";
 
 const NOW = DateTime.makeUnsafe("2026-11-11T12:00:00.000Z");
 const SYSTEM_AWAKE = `-i -w ${process.pid}`;
 const SYSTEM_AND_SCREEN_AWAKE = `-di -w ${process.pid}`;
+const LID_HELD = "lid";
 
 const workingThread = (
   id: string,
@@ -39,6 +46,7 @@ const harness = Effect.fn("test.keepAwakeHarness")(function* (
     readonly stateFile?: string;
     readonly threads?: ReadonlyArray<AgentWorkSource.AgentWorkThread>;
     readonly platform?: NodeJS.Platform;
+    readonly lidSetupFails?: boolean;
   } = {},
 ) {
   const fs = yield* FileSystem.FileSystem;
@@ -51,16 +59,24 @@ const harness = Effect.fn("test.keepAwakeHarness")(function* (
   const threads = new Map((options.threads ?? []).map((thread) => [thread.id, thread]));
   const changedThreadIds = yield* Queue.unbounded<ThreadId>();
 
+  const holdUntilInterrupted = (name: string) =>
+    Effect.acquireUseRelease(
+      SubscriptionRef.update(running, (current) => [...current, name]),
+      () => Effect.never,
+      () =>
+        SubscriptionRef.update(running, (current) =>
+          current.filter((_, index) => index !== current.indexOf(name)),
+        ),
+    );
   const caffeinate = CaffeinateProcess.CaffeinateProcess.of({
-    run: (args) =>
-      Effect.acquireUseRelease(
-        SubscriptionRef.update(running, (current) => [...current, args.join(" ")]),
-        () => Effect.never,
-        () =>
-          SubscriptionRef.update(running, (current) =>
-            current.filter((_, index) => index !== current.indexOf(args.join(" "))),
-          ),
-      ),
+    run: (args) => holdUntilInterrupted(args.join(" ")),
+  });
+  const lidSleep = LidSleep.LidSleep.of({
+    install: () =>
+      options.lidSetupFails === true
+        ? Effect.fail(new KeepAwakeLidSetupError({ message: "cancelled" }))
+        : Effect.void,
+    hold: () => holdUntilInterrupted(LID_HELD),
   });
   const agentWork = AgentWorkSource.AgentWorkSource.of({
     threads: (threadId) =>
@@ -74,6 +90,7 @@ const harness = Effect.fn("test.keepAwakeHarness")(function* (
 
   const start = KeepAwake.make(filePath).pipe(
     Effect.provideService(CaffeinateProcess.CaffeinateProcess, caffeinate),
+    Effect.provideService(LidSleep.LidSleep, lidSleep),
     Effect.provideService(AgentWorkSource.AgentWorkSource, agentWork),
     Effect.provideService(HostProcess.Platform, options.platform ?? "darwin"),
   );
@@ -125,6 +142,40 @@ describe("KeepAwake", () => {
       yield* caffeinateWhere([SYSTEM_AND_SCREEN_AWAKE]);
 
       yield* keepAwake.set({ keepScreenOn: false });
+      yield* caffeinateWhere([SYSTEM_AWAKE]);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("holds the lid open only while on with the lid option set", () =>
+    Effect.gen(function* () {
+      const { keepAwake, caffeinateWhere } = yield* harness();
+
+      const off = yield* keepAwake.set({ lidClosed: true });
+      assert.isTrue(off.state.lidClosed);
+      yield* caffeinateWhere([]);
+
+      yield* keepAwake.set({ mode: { _tag: "Manual" } });
+      yield* caffeinateWhere([SYSTEM_AWAKE, LID_HELD]);
+
+      yield* keepAwake.set({ lidClosed: false });
+      yield* caffeinateWhere([SYSTEM_AWAKE]);
+
+      yield* keepAwake.set({ lidClosed: true });
+      yield* caffeinateWhere([SYSTEM_AWAKE, LID_HELD]);
+
+      yield* keepAwake.set({ mode: { _tag: "Off" } });
+      yield* caffeinateWhere([]);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("leaves the lid option off when its setup is refused", () =>
+    Effect.gen(function* () {
+      const { keepAwake, currentStatus, caffeinateWhere } = yield* harness({ lidSetupFails: true });
+      yield* keepAwake.set({ mode: { _tag: "Manual" } });
+
+      const error = yield* keepAwake.set({ lidClosed: true }).pipe(Effect.flip);
+      assert.instanceOf(error, KeepAwakeLidSetupError);
+      assert.isFalse((yield* currentStatus).state.lidClosed);
       yield* caffeinateWhere([SYSTEM_AWAKE]);
     }).pipe(Effect.provide(NodeServices.layer)),
   );
@@ -184,13 +235,18 @@ describe("KeepAwake", () => {
   it.effect("restores the mode and screen flag after a restart", () =>
     Effect.gen(function* () {
       const first = yield* harness();
-      yield* first.keepAwake.set({ mode: { _tag: "For", minutes: 120 }, keepScreenOn: true });
+      yield* first.keepAwake.set({
+        mode: { _tag: "For", minutes: 120 },
+        keepScreenOn: true,
+        lidClosed: true,
+      });
 
       const restarted = yield* first.start;
       const status = yield* restarted.status.pipe(Stream.runHead, Effect.map(Option.getOrThrow));
       assert.deepStrictEqual(status.state, {
         mode: { _tag: "Timed", endsAt: DateTime.makeUnsafe("2026-11-11T14:00:00.000Z") },
         keepScreenOn: true,
+        lidClosed: true,
       });
     }).pipe(Effect.provide(NodeServices.layer)),
   );
@@ -204,7 +260,11 @@ describe("KeepAwake", () => {
         }),
       });
       const status = yield* currentStatus;
-      assert.deepStrictEqual(status.state, { mode: { _tag: "Off" }, keepScreenOn: true });
+      assert.deepStrictEqual(status.state, {
+        mode: { _tag: "Off" },
+        keepScreenOn: true,
+        lidClosed: false,
+      });
       yield* caffeinateWhere([]);
     }).pipe(Effect.provide(NodeServices.layer)),
   );
