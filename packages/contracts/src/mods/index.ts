@@ -1,4 +1,10 @@
 import {
+  CALENDAR_METHODS,
+  CALENDAR_RPC_SCOPES,
+  CalendarSetFeedRpc,
+  CalendarSubscribeRpc,
+} from "./calendar.ts";
+import {
   KEEP_AWAKE_METHODS,
   KEEP_AWAKE_RPC_SCOPES,
   KeepAwakeSetRpc,
@@ -11,18 +17,26 @@ import {
   SpotifySubscribeRpc,
 } from "./spotify.ts";
 
+export * from "./calendar.ts";
 export * from "./keepAwake.ts";
 export * from "./spotify.ts";
 
 export const MOD_RPCS = [
+  CalendarSetFeedRpc,
+  CalendarSubscribeRpc,
   KeepAwakeSetRpc,
   KeepAwakeSubscribeRpc,
   SpotifyControlRpc,
   SpotifySubscribeRpc,
 ] as const;
 
-export const MOD_RPC_SCOPES = { ...KEEP_AWAKE_RPC_SCOPES, ...SPOTIFY_RPC_SCOPES } as const;
+export const MOD_RPC_SCOPES = {
+  ...CALENDAR_RPC_SCOPES,
+  ...KEEP_AWAKE_RPC_SCOPES,
+  ...SPOTIFY_RPC_SCOPES,
+} as const;
 
 export type ModSubscriptionRpcTag =
+  | typeof CALENDAR_METHODS.subscribe
   | typeof KEEP_AWAKE_METHODS.subscribe
   | typeof SPOTIFY_METHODS.subscribe;
