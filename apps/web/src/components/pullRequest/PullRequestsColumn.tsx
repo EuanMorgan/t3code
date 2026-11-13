@@ -3,6 +3,7 @@ import { Plug2Icon, SearchIcon } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 
 import { isElectron } from "~/env";
+import { ModPullRequestsListSlot } from "~/mods";
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
 import { RefreshIcon } from "../ui/refresh-icon";
@@ -257,7 +258,7 @@ export function PullRequestsColumn({
             <div ref={markerRef} aria-hidden className="-mt-3 h-px w-full" />
           </div>
 
-          {listBody}
+          <ModPullRequestsListSlot list={listBody} search={searchValue} />
         </WorkspacePageContainer>
       </div>
     </div>
