@@ -10,6 +10,8 @@ export interface WebMod {
   readonly description: string;
   readonly SidebarHeaderItem?: ComponentType<{ readonly onBackdrop: boolean }>;
   readonly SidebarFooterItem?: ComponentType;
+  /** Extra settings shown under the plugin's switch while it is on. */
+  readonly SettingsItem?: ComponentType;
   readonly onDisable?: (registry: AtomRegistry.AtomRegistry) => void;
 }
 
