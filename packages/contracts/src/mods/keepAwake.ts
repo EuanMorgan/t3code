@@ -1,3 +1,4 @@
+import * as Effect from "effect/Effect";
 import * as Rpc from "effect/rpc/Rpc";
 import * as Schema from "effect/Schema";
 
@@ -28,6 +29,7 @@ export type KeepAwakeMode = typeof KeepAwakeMode.Type;
 export const KeepAwakeState = Schema.Struct({
   mode: KeepAwakeMode,
   keepScreenOn: Schema.Boolean,
+  lidClosed: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
 });
 export type KeepAwakeState = typeof KeepAwakeState.Type;
 
@@ -52,6 +54,7 @@ export type KeepAwakeModeRequest = typeof KeepAwakeModeRequest.Type;
 export const KeepAwakeSetInput = Schema.Struct({
   mode: Schema.optionalKey(KeepAwakeModeRequest),
   keepScreenOn: Schema.optionalKey(Schema.Boolean),
+  lidClosed: Schema.optionalKey(Schema.Boolean),
 });
 export type KeepAwakeSetInput = typeof KeepAwakeSetInput.Type;
 
@@ -60,10 +63,19 @@ export class KeepAwakeUnsupportedError extends Schema.TaggedError<KeepAwakeUnsup
   { message: Schema.String },
 ) {}
 
+export class KeepAwakeLidSetupError extends Schema.TaggedError<KeepAwakeLidSetupError>()(
+  "KeepAwakeLidSetupError",
+  { message: Schema.String },
+) {}
+
 export const KeepAwakeSetRpc = Rpc.make(KEEP_AWAKE_METHODS.set, {
   payload: KeepAwakeSetInput,
   success: KeepAwakeStatus,
-  error: Schema.Union([KeepAwakeUnsupportedError, EnvironmentAuthorizationError]),
+  error: Schema.Union([
+    KeepAwakeUnsupportedError,
+    KeepAwakeLidSetupError,
+    EnvironmentAuthorizationError,
+  ]),
 });
 
 export const KeepAwakeSubscribeRpc = Rpc.make(KEEP_AWAKE_METHODS.subscribe, {

@@ -1,5 +1,6 @@
 import {
   isListedThreadLineage,
+  KeepAwakeLidSetupError,
   KeepAwakeState,
   KeepAwakeUnsupportedError,
   type KeepAwakeMode,
@@ -27,6 +28,7 @@ import * as ServerConfig from "../../config.ts";
 import { forkParked } from "../../serverActivation.ts";
 import * as AgentWorkSource from "./AgentWorkSource.ts";
 import * as CaffeinateProcess from "./CaffeinateProcess.ts";
+import * as LidSleep from "./LidSleep.ts";
 
 export class KeepAwake extends Context.Service<
   KeepAwake,
@@ -35,7 +37,7 @@ export class KeepAwake extends Context.Service<
     readonly status: Stream.Stream<KeepAwakeStatus>;
     readonly set: (
       input: KeepAwakeSetInput,
-    ) => Effect.Effect<KeepAwakeStatus, KeepAwakeUnsupportedError>;
+    ) => Effect.Effect<KeepAwakeStatus, KeepAwakeUnsupportedError | KeepAwakeLidSetupError>;
   }
 >()("t3/mods/keepAwake/KeepAwake") {}
 
@@ -53,7 +55,7 @@ type KeepAwakeEvent =
   | { readonly _tag: "AgentsWorking"; readonly working: boolean }
   | { readonly _tag: "DeadlineReached" };
 
-const OFF_STATE: KeepAwakeState = { mode: { _tag: "Off" }, keepScreenOn: false };
+const OFF_STATE: KeepAwakeState = { mode: { _tag: "Off" }, keepScreenOn: false, lidClosed: false };
 
 const ACTIVE_RUN_STATUSES: ReadonlySet<string> = new Set([
   "preparing",
@@ -122,6 +124,7 @@ const transition = (
                 ? current.state.mode
                 : requestedMode(event.input.mode, now),
             keepScreenOn: event.input.keepScreenOn ?? current.state.keepScreenOn,
+            lidClosed: event.input.lidClosed ?? current.state.lidClosed,
           },
         };
       case "AgentsWorking":
@@ -159,11 +162,15 @@ const caffeinateArgs = (state: KeepAwakeState): ReadonlyArray<string> | null =>
     : // -w ends the assertion with this server, so a crash can never leave the Mac awake.
       [state.keepScreenOn ? "-di" : "-i", "-w", String(process.pid)];
 
+const holdsLidOpen = (state: KeepAwakeState) => state.mode._tag !== "Off" && state.lidClosed;
+
 const sameArgs = (a: ReadonlyArray<string> | null, b: ReadonlyArray<string> | null) =>
   a?.join(" ") === b?.join(" ");
 
 const sameState = (a: KeepAwakeState, b: KeepAwakeState) =>
-  modeKey(a.mode) === modeKey(b.mode) && a.keepScreenOn === b.keepScreenOn;
+  modeKey(a.mode) === modeKey(b.mode) &&
+  a.keepScreenOn === b.keepScreenOn &&
+  a.lidClosed === b.lidClosed;
 
 const KeepAwakeStateJson = Schema.fromJsonString(Schema.toCodecJson(KeepAwakeState));
 const decodeStateFile = Schema.decodeUnknownEffect(KeepAwakeStateJson);
@@ -184,6 +191,7 @@ const readStateFile = Effect.fn("KeepAwake.readStateFile")(function* (filePath: 
 
 export const make = Effect.fn("KeepAwake.make")(function* (filePath: string) {
   const caffeinate = yield* CaffeinateProcess.CaffeinateProcess;
+  const lidSleep = yield* LidSleep.LidSleep;
   const agentWork = yield* AgentWorkSource.AgentWorkSource;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -196,6 +204,7 @@ export const make = Effect.fn("KeepAwake.make")(function* (filePath: string) {
   });
   const lock = yield* Semaphore.make(1);
   const caffeinateFiber = yield* FiberHandle.make();
+  const lidFiber = yield* FiberHandle.make();
   const deadlineFiber = yield* FiberHandle.make();
   const deadlinesReached = yield* Queue.unbounded<void>();
 
@@ -232,6 +241,12 @@ export const make = Effect.fn("KeepAwake.make")(function* (filePath: string) {
         yield* args === null
           ? FiberHandle.clear(caffeinateFiber)
           : FiberHandle.run(caffeinateFiber, caffeinate.run(args)).pipe(Effect.asVoid);
+      }
+
+      if (holdsLidOpen(previous.state) !== holdsLidOpen(next.state)) {
+        yield* holdsLidOpen(next.state)
+          ? FiberHandle.run(lidFiber, lidSleep.hold()).pipe(Effect.asVoid)
+          : FiberHandle.clear(lidFiber);
       }
 
       const deadline = deadlineOf(next.state.mode);
@@ -295,6 +310,7 @@ export const make = Effect.fn("KeepAwake.make")(function* (filePath: string) {
           message: "Keep Awake needs macOS on the machine running T3 Code.",
         });
       }
+      if (input.lidClosed === true) yield* lidSleep.install();
       return toStatus(yield* apply({ _tag: "Requested", input }));
     }),
   });
@@ -307,4 +323,8 @@ export const layer = Layer.effect(
     const path = yield* Path.Path;
     return yield* make(path.join(config.stateDir, "keep-awake.json"));
   }),
-).pipe(Layer.provide(CaffeinateProcess.layer), Layer.provide(AgentWorkSource.layer));
+).pipe(
+  Layer.provide(CaffeinateProcess.layer),
+  Layer.provide(LidSleep.layer),
+  Layer.provide(AgentWorkSource.layer),
+);
