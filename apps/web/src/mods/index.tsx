@@ -10,6 +10,8 @@ import {
   SettingsSection,
 } from "../components/settings/settingsLayout";
 import { Switch } from "../components/ui/switch";
+import { CalendarSettings } from "./calendar/CalendarSettings";
+import { NextMeetingCard } from "./calendar/NextMeetingCard";
 import { KeepAwakeButton } from "./keepAwake/KeepAwakeButton";
 import { turnKeepAwakeOff } from "./keepAwake/state";
 import { useRefreshSkillsAction } from "./refreshSkills/useRefreshSkillsAction";
@@ -37,6 +39,14 @@ const MODS: ReadonlyArray<WebMod> = [
     description:
       "Shows the song playing in Spotify on the Mac running T3 Code at the bottom of the sidebar, with play, pause and skip buttons.",
     SidebarFooterItem: SpotifyNowPlaying,
+  },
+  {
+    id: "calendar",
+    name: "Next meeting",
+    description:
+      "Shows your next Google Calendar meeting in the next day at the bottom of the sidebar, with a button to join it.",
+    SidebarFooterItem: NextMeetingCard,
+    SettingsItem: CalendarSettings,
   },
 ];
 
@@ -70,7 +80,7 @@ export function ModsSettingsPanel() {
   return (
     <SettingsPageContainer>
       <SettingsSection id="plugins" title="Plugins">
-        {MODS.map((mod) => (
+        {MODS.map(({ SettingsItem, ...mod }) => (
           <SettingsRow
             key={mod.id}
             title={mod.name}
@@ -85,7 +95,9 @@ export function ModsSettingsPanel() {
                 }}
               />
             }
-          />
+          >
+            {SettingsItem !== undefined && isEnabled(mod.id) ? <SettingsItem /> : null}
+          </SettingsRow>
         ))}
       </SettingsSection>
     </SettingsPageContainer>
