@@ -15,10 +15,16 @@ function run(command: string, args: ReadonlyArray<string>, options: RunOptions =
     env: options.env,
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
+    timeout: options.timeoutMs,
     stdio: ["ignore", options.logFd ?? "pipe", options.logFd ?? "pipe"],
   });
   if (result.status !== 0) {
-    throw new CommandError(command, args, result.status, `${result.stderr ?? ""}`.trim());
+    throw new CommandError(
+      command,
+      args,
+      result.status,
+      `${result.stderr || result.error?.message || ""}`.trim(),
+    );
   }
   return `${result.stdout ?? ""}`.trim();
 }
@@ -27,6 +33,7 @@ interface RunOptions {
   readonly cwd?: string;
   readonly env?: NodeJS.ProcessEnv;
   readonly logFd?: number;
+  readonly timeoutMs?: number;
 }
 
 class CommandError extends Error {
@@ -38,6 +45,108 @@ class CommandError extends Error {
 class RebaseConflictError extends Error {}
 
 const git = (cwd: string, ...args: string[]) => run("git", args, { cwd });
+
+// GitHub often drops the SSH connection mid-transfer, and a fetch can hang overnight.
+function gitOverNetwork(cwd: string, ...args: string[]) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return run("git", args, { cwd, timeoutMs: 10 * 60_000 });
+    } catch (error) {
+      if (attempt === 4) throw error;
+      NodeChildProcess.spawnSync("sleep", [String(attempt * 30)]);
+    }
+  }
+}
+
+function askClaude(checkout: string, prompt: string, logFd: number) {
+  run(
+    "claude",
+    [
+      "-p",
+      prompt,
+      "--model",
+      "opus",
+      "--permission-mode",
+      "acceptEdits",
+      "--allowedTools",
+      "Read,Edit,Write,Grep,Glob,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git add:*),Bash(vp run typecheck:*)",
+    ],
+    { cwd: checkout, logFd, timeoutMs: 45 * 60_000 },
+  );
+}
+
+const PLUGIN_CONTEXT =
+  "This checkout is E3 Code, a fork of T3 Code whose commits add plugins on top of upstream. " +
+  "Read .agents/skills/add-e3-plugin/SKILL.md for how plugins hook into upstream files. " +
+  "Keep every upstream change, and keep what each plugin commit was for.";
+
+function conflictMarkers(checkout: string, files: ReadonlyArray<string>) {
+  return files.filter((file) => {
+    const path = NodePath.join(checkout, file);
+    return NodeFS.existsSync(path) && /^(<{7}|>{7})( |$)/m.test(NodeFS.readFileSync(path, "utf8"));
+  });
+}
+
+function resolveConflicts(checkout: string, files: ReadonlyArray<string>, logFd: number) {
+  const commit = git(checkout, "log", "-1", "--format=%h %s", "REBASE_HEAD");
+  NodeFS.writeSync(logFd, `\nAsking Claude Code to resolve ${files.join(", ")} in ${commit}\n`);
+  let failure: unknown;
+  try {
+    askClaude(
+      checkout,
+      `${PLUGIN_CONTEXT} A rebase onto upstream/main stopped while replaying fork commit ${commit}. ` +
+        `Resolve the conflicts in ${files.join(", ")}, then git add each file. ` +
+        "Do not commit, continue or abort the rebase, and do not push.",
+      logFd,
+    );
+  } catch (error) {
+    failure = error;
+  }
+  const unresolved = [
+    ...new Set([
+      ...git(checkout, "diff", "--name-only", "--diff-filter=U").split("\n").filter(Boolean),
+      ...conflictMarkers(checkout, files),
+    ]),
+  ];
+  if (failure || unresolved.length > 0) {
+    git(checkout, "rebase", "--abort");
+    throw new RebaseConflictError(
+      `Rebase onto upstream/main conflicted in ${files.join(", ")}, and Claude Code could not resolve it.`,
+      { cause: failure },
+    );
+  }
+}
+
+function typechecks(checkout: string, logFd: number) {
+  try {
+    run("vp", ["run", "typecheck"], { cwd: checkout, logFd });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Upstream can rename something a plugin uses without any textual conflict.
+function ensureTypechecks(checkout: string, logFd: number, step: (message: string) => void) {
+  step("Typechecking");
+  if (typechecks(checkout, logFd)) return;
+  step("Typecheck failed; asking Claude Code to fix the plugins");
+  askClaude(
+    checkout,
+    `${PLUGIN_CONTEXT} \`vp run typecheck\` fails after rebasing the fork onto upstream/main. ` +
+      "Fix it by changing the fork's plugin code, the files in `git diff --name-only upstream/main HEAD`. " +
+      "If an error does not come from the fork's changes, leave it alone. " +
+      "Run `vp run typecheck` until it passes, then git add your changes. Do not commit or push.",
+    logFd,
+  );
+  if (git(checkout, "status", "--porcelain")) {
+    git(checkout, "add", "--all");
+    git(checkout, "commit", "-m", "fix(mods): adapt plugins to upstream changes");
+  }
+  if (!typechecks(checkout, logFd)) {
+    throw new Error("The rebased fork does not typecheck, and Claude Code could not fix it.");
+  }
+}
 
 function modPaths() {
   const repoRoot = NodePath.resolve(import.meta.dirname, "../..");
@@ -56,6 +165,7 @@ function modPaths() {
     release: NodePath.join(home, "out", "release"),
     logs: NodePath.join(home, "logs"),
     lastPublished: NodePath.join(home, "last-published.json"),
+    claudeToken: NodePath.join(home, "claude-token"),
   };
 }
 type ModPaths = ReturnType<typeof modPaths>;
@@ -367,7 +477,7 @@ function ensureCheckout(paths: ModPaths) {
   git(paths.mainCheckout, "worktree", "add", "--detach", paths.checkout, "origin/main");
 }
 
-function rebaseOntoUpstream(checkout: string, commitCount: number) {
+function rebaseOntoUpstream(checkout: string, commitCount: number, logFd: number) {
   const rerere = [
     "-c",
     "rerere.enabled=true",
@@ -389,12 +499,7 @@ function rebaseOntoUpstream(checkout: string, commitCount: number) {
     } catch (error) {
       if (!rebasing()) throw error;
       const conflicts = git(checkout, "diff", "--name-only", "--diff-filter=U");
-      if (conflicts) {
-        git(checkout, "rebase", "--abort");
-        throw new RebaseConflictError(
-          `Rebase onto upstream/main conflicted in ${conflicts.split("\n").join(", ")}.`,
-        );
-      }
+      if (conflicts) resolveConflicts(checkout, conflicts.split("\n"), logFd);
       args = [...rerere, "rebase", "--continue"];
     }
   }
@@ -412,10 +517,14 @@ async function update(paths: ModPaths, flags: { force: boolean; push: boolean; b
     NodeFS.writeSync(logFd, `\n== ${message}\n`);
   };
   const { checkout } = paths;
+  // A normal Claude Code sign-in expires within weeks; `claude setup-token` lasts a year.
+  if (NodeFS.existsSync(paths.claudeToken)) {
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = NodeFS.readFileSync(paths.claudeToken, "utf8").trim();
+  }
   try {
     step("Fetching upstream and origin");
-    git(checkout, "fetch", "upstream");
-    git(checkout, "fetch", "origin");
+    gitOverNetwork(checkout, "fetch", "upstream");
+    gitOverNetwork(checkout, "fetch", "origin");
     const upstream = git(checkout, "rev-parse", "upstream/main");
     const origin = git(checkout, "rev-parse", `origin/${flags.branch}`);
     const last = NodeFS.existsSync(paths.lastPublished)
@@ -434,12 +543,17 @@ async function update(paths: ModPaths, flags: { force: boolean; push: boolean; b
     git(checkout, "clean", "-fd");
     git(checkout, "checkout", "--detach", origin);
     const modCommits = Number(git(checkout, "rev-list", "--count", `upstream/main..${origin}`));
-    rebaseOntoUpstream(checkout, modCommits);
+    rebaseOntoUpstream(checkout, modCommits, logFd);
+
+    step("Installing dependencies");
+    installDependencies(checkout, logFd);
+    ensureTypechecks(checkout, logFd, step);
+
     const head = git(checkout, "rev-parse", "HEAD");
     if (head !== origin) {
       if (flags.push) {
         step(`Pushing ${head.slice(0, 12)} to origin/${flags.branch}`);
-        git(
+        gitOverNetwork(
           checkout,
           "push",
           `--force-with-lease=${flags.branch}:${origin}`,
@@ -451,8 +565,6 @@ async function update(paths: ModPaths, flags: { force: boolean; push: boolean; b
       }
     }
 
-    step("Installing dependencies");
-    installDependencies(checkout, logFd);
     const repository = githubRepository(checkout);
     const release = nightlyRelease(checkout, head);
     step(`Building ${release.version} for ${repository} (log: ${logPath})`);
@@ -528,6 +640,8 @@ function installSchedule(paths: ModPaths) {
     <string>-lc</string>
     <string>${xml(command)}</string>
   </array>
+  <key>RunAtLoad</key>
+  <true/>
   <key>StartCalendarInterval</key>
   <dict>
     <key>Hour</key>

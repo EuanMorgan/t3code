@@ -1,18 +1,20 @@
 # Nightly mod builds
 
-`vp run mod:update` turns this fork's `main` into a macOS arm64 build of T3 Code, named E3 Code, and publishes it as a GitHub prerelease on the fork. An installed mod build checks that feed and shows the usual update button in the sidebar. A launchd job runs the update every night at 03:00.
+`vp run mod:update` turns this fork's `main` into a macOS arm64 build of T3 Code, named E3 Code, and publishes it as a GitHub prerelease on the fork. An installed mod build checks that feed and shows the usual update button in the sidebar. A launchd job runs the update every night at 03:00 and at each login, so a night the Mac was off is caught up.
 
 Each run does the following in its own checkout, `../t3code-mod-build/checkout` beside the main clone:
 
-1. Fetch `upstream` and `origin`. Stop if neither `main` moved since the last published build. Pass `--force` to build anyway.
-2. Rebase `origin/main` onto `upstream/main` with `git rerere`, then push it to `origin/main` with `--force-with-lease`. Pass `--no-push` to leave `origin/main` alone; the release is still tagged at the rebased commit. Pass `--branch <name>` to build another branch of the fork instead of `main`.
-3. Build the app, sign it with the mod certificate, and publish the release.
+1. Fetch `upstream` and `origin`, retrying when GitHub drops the connection. Stop if neither `main` moved since the last published build. Pass `--force` to build anyway.
+2. Rebase `origin/main` onto `upstream/main` with `git rerere`. When a commit conflicts, Claude Code (`claude -p`, Opus) resolves it.
+3. Install dependencies and run `vp run typecheck`. If it fails, Claude Code fixes the plugin code and the run commits the fix as `fix(mods): adapt plugins to upstream changes`.
+4. Push to `origin/main` with `--force-with-lease`. Pass `--no-push` to leave `origin/main` alone; the release is still tagged at the rebased commit. Pass `--branch <name>` to build another branch of the fork instead of `main`.
+5. Build the app, sign it with the mod certificate, and publish the release.
 
-If the rebase conflicts, the run aborts it, changes nothing, and shows a notification that names the files. If anything else fails, the notification names the log in `../t3code-mod-build/logs`.
+If Claude Code cannot resolve a conflict or fix the typecheck, the run pushes nothing and shows a notification. Claude's output is in the run's log in `../t3code-mod-build/logs`.
 
 ## One-time setup
 
-You need `vp`, Rust from `rustup`, the Xcode command line tools, `gh` signed in as the fork's owner, and SSH push access to the fork. The script adds `~/.cargo/bin` to `PATH` itself. Run the commands below from the main clone.
+You need `vp`, Rust from `rustup`, the Xcode command line tools, `gh` signed in as the fork's owner, SSH push access to the fork, and `claude` signed in. The script adds `~/.cargo/bin` to `PATH` itself. Run the commands below from the main clone.
 
 1. Create the signing certificate:
 
@@ -38,7 +40,9 @@ You need `vp`, Rust from `rustup`, the Xcode command line tools, `gh` signed in 
 
    The official app is signed by T3's Apple Developer ID, so its updater cannot install a mod build. This step is the only manual install. On first launch macOS asks once for access to the "T3 Code (Nightly) Safe Storage" keychain item; choose Always Allow. Permissions such as screen recording are asked for again once.
 
-4. Schedule the nightly run:
+4. Give the nightly run a long-lived Claude Code token, since a normal sign-in expires within weeks. Run `claude setup-token` and save the token it prints to `../t3code-mod-build/claude-token`.
+
+5. Schedule the nightly run:
 
    ```sh
    vp run mod:install-schedule
@@ -48,7 +52,7 @@ You need `vp`, Rust from `rustup`, the Xcode command line tools, `gh` signed in 
 
 ## Recover from a rebase conflict
 
-Resolve the conflict once in a dev checkout. `rerere` records the resolution in the shared `.git`, and the nightly run reuses it.
+When Claude Code could not resolve a conflict, resolve it once in a dev checkout. `rerere` records the resolution in the shared `.git`, and the nightly run reuses it.
 
 ```sh
 git config rerere.enabled true
