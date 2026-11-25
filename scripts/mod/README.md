@@ -1,14 +1,14 @@
 # Nightly mod builds
 
-`vp run mod:update` turns this fork's `main` into a macOS arm64 build of T3 Code, named E3 Code, and publishes it as a GitHub prerelease on the fork. An installed mod build checks that feed and shows the usual update button in the sidebar. A launchd job runs the update every night at 03:00 and at each login, so a night the Mac was off is caught up.
+`vp run mod:update` turns this fork's `main` into a macOS arm64 build of T3 Code, named E3 Code, and publishes it as a GitHub prerelease on the fork. An installed mod build checks that feed and shows the usual update button in the sidebar. A launchd job runs the update every 30 minutes and at login. It builds only when T3 has published a new nightly or the fork has changed, so E3 Code follows T3 Nightly a few minutes behind it.
 
 Each run does the following in its own checkout, `../t3code-mod-build/checkout` beside the main clone:
 
-1. Fetch `upstream` and `origin`, retrying when GitHub drops the connection. Stop if neither `main` moved since the last published build. Pass `--force` to build anyway.
-2. Rebase `origin/main` onto `upstream/main` with `git rerere`. When a commit conflicts, Claude Code (`claude -p`, Opus) resolves it.
+1. Find T3's newest nightly release, fetch its commit as `refs/mod/t3-nightly`, and fetch `origin`, retrying when GitHub drops the connection. Stop if neither moved since the last published build. Pass `--force` to build anyway. A run that can't reach GitHub stops without a notification.
+2. Rebase `origin/main` onto `refs/mod/t3-nightly` with `git rerere`. When a commit conflicts, Claude Code (`claude -p`, Opus) resolves it.
 3. Install dependencies and run `vp run typecheck`. If it fails, Claude Code fixes the plugin code and the run commits the fix as `fix(mods): adapt plugins to upstream changes`.
 4. Push to `origin/main` with `--force-with-lease`. Pass `--no-push` to leave `origin/main` alone; the release is still tagged at the rebased commit. Pass `--branch <name>` to build another branch of the fork instead of `main`.
-5. Build the app, sign it with the mod certificate, and publish the release.
+5. Build the app, sign it with the mod certificate, and publish the release. Delete all but the newest 5 nightly releases.
 
 If Claude Code cannot resolve a conflict or fix the typecheck, the run pushes nothing and shows a notification. Claude's output is in the run's log in `../t3code-mod-build/logs`.
 
@@ -48,7 +48,7 @@ You need `vp`, Rust from `rustup`, the Xcode command line tools, `gh` signed in 
    vp run mod:install-schedule
    ```
 
-   If the Mac is asleep at 03:00, launchd runs the job when it wakes.
+   If the Mac is asleep at one of those times, launchd runs the job when it wakes.
 
 ## Recover from a rebase conflict
 
@@ -56,9 +56,9 @@ When Claude Code could not resolve a conflict, resolve it once in a dev checkout
 
 ```sh
 git config rerere.enabled true
-git fetch upstream && git fetch origin
+git fetch origin
 git switch --detach origin/main
-git rebase upstream/main
+git rebase refs/mod/t3-nightly
 # resolve each conflict, then: git add <files> && git rebase --continue
 git push --force-with-lease=main:origin/main origin HEAD:main
 vp run mod:update
@@ -66,4 +66,4 @@ vp run mod:update
 
 ## Limits
 
-Mod builds have no Apple Developer ID. macOS does not notarize them, and the in-app browser cannot use passkeys. Each release adds about 200 MB to the fork's releases; delete old ones on GitHub when you like.
+Mod builds have no Apple Developer ID. macOS does not notarize them, and the in-app browser cannot use passkeys.

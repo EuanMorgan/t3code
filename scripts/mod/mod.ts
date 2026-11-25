@@ -6,7 +6,9 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
 const SCHEDULE_LABEL = "com.t3code.mod-update";
-const SCHEDULE_HOUR = 3;
+const SCHEDULE_INTERVAL_SECONDS = 30 * 60;
+const T3_NIGHTLY = "refs/mod/t3-nightly";
+const KEPT_RELEASES = 5;
 const APP_NAME = "E3 Code";
 
 function run(command: string, args: ReadonlyArray<string>, options: RunOptions = {}): string {
@@ -44,6 +46,9 @@ class CommandError extends Error {
 
 class RebaseConflictError extends Error {}
 
+// Offline is normal on a laptop, so these failures skip the notification.
+class NetworkError extends Error {}
+
 const git = (cwd: string, ...args: string[]) => run("git", args, { cwd });
 
 // GitHub often drops the SSH connection mid-transfer, and a fetch can hang overnight.
@@ -52,7 +57,7 @@ function gitOverNetwork(cwd: string, ...args: string[]) {
     try {
       return run("git", args, { cwd, timeoutMs: 10 * 60_000 });
     } catch (error) {
-      if (attempt === 4) throw error;
+      if (attempt === 4) throw new NetworkError(String(error), { cause: error });
       NodeChildProcess.spawnSync("sleep", [String(attempt * 30)]);
     }
   }
@@ -94,7 +99,7 @@ function resolveConflicts(checkout: string, files: ReadonlyArray<string>, logFd:
   try {
     askClaude(
       checkout,
-      `${PLUGIN_CONTEXT} A rebase onto upstream/main stopped while replaying fork commit ${commit}. ` +
+      `${PLUGIN_CONTEXT} A rebase onto T3 Nightly (${T3_NIGHTLY}) stopped while replaying fork commit ${commit}. ` +
         `Resolve the conflicts in ${files.join(", ")}, then git add each file. ` +
         "Do not commit, continue or abort the rebase, and do not push.",
       logFd,
@@ -111,7 +116,7 @@ function resolveConflicts(checkout: string, files: ReadonlyArray<string>, logFd:
   if (failure || unresolved.length > 0) {
     git(checkout, "rebase", "--abort");
     throw new RebaseConflictError(
-      `Rebase onto upstream/main conflicted in ${files.join(", ")}, and Claude Code could not resolve it.`,
+      `Rebase onto T3 Nightly conflicted in ${files.join(", ")}, and Claude Code could not resolve it.`,
       { cause: failure },
     );
   }
@@ -133,8 +138,8 @@ function ensureTypechecks(checkout: string, logFd: number, step: (message: strin
   step("Typecheck failed; asking Claude Code to fix the plugins");
   askClaude(
     checkout,
-    `${PLUGIN_CONTEXT} \`vp run typecheck\` fails after rebasing the fork onto upstream/main. ` +
-      "Fix it by changing the fork's plugin code, the files in `git diff --name-only upstream/main HEAD`. " +
+    `${PLUGIN_CONTEXT} \`vp run typecheck\` fails after rebasing the fork onto T3 Nightly (${T3_NIGHTLY}). ` +
+      `Fix it by changing the fork's plugin code, the files in \`git diff --name-only ${T3_NIGHTLY} HEAD\`. ` +
       "If an error does not come from the fork's changes, leave it alone. " +
       "Run `vp run typecheck` until it passes, then git add your changes. Do not commit or push.",
     logFd,
@@ -361,10 +366,10 @@ function renameApp(app: string) {
   return renamed;
 }
 
-function githubRepository(checkout: string) {
-  const url = git(checkout, "remote", "get-url", "origin");
+function githubRepository(checkout: string, remote = "origin") {
+  const url = git(checkout, "remote", "get-url", remote);
   const match = /[:/]([^/:]+\/[^/]+?)(?:\.git)?$/.exec(url);
-  if (!match?.[1]) throw new Error(`Cannot read owner/repo from origin ${url}.`);
+  if (!match?.[1]) throw new Error(`Cannot read owner/repo from ${remote} ${url}.`);
   return match[1];
 }
 
@@ -470,6 +475,57 @@ function publishRelease(input: {
   );
 }
 
+// Each release is about 200 MB, and an install only ever updates to the newest.
+function pruneReleases(repository: string) {
+  const env = { ...process.env, GH_TOKEN: githubToken(repository) };
+  const tags = run(
+    "gh",
+    [
+      "release",
+      "list",
+      "--repo",
+      repository,
+      "--limit",
+      "200",
+      "--json",
+      "tagName,isPrerelease",
+      "--jq",
+      '.[] | select(.isPrerelease and (.tagName | contains("-nightly."))) | .tagName',
+    ],
+    { env },
+  );
+  for (const tag of tags.split("\n").filter(Boolean).slice(KEPT_RELEASES)) {
+    run("gh", ["release", "delete", tag, "--repo", repository, "--cleanup-tag", "--yes"], { env });
+  }
+}
+
+// Building on T3's own nightly commits keeps E3 Code in step with T3 Nightly, which T3 builds
+// and checks first, and limits builds to its few releases a day.
+function fetchLatestT3Nightly(checkout: string) {
+  let tag: string;
+  try {
+    tag = run("gh", [
+      "release",
+      "list",
+      "--repo",
+      githubRepository(checkout, "upstream"),
+      "--limit",
+      "20",
+      "--json",
+      "tagName,isPrerelease",
+      "--jq",
+      '[.[] | select(.isPrerelease and (.tagName | contains("-nightly.")))][0].tagName // ""',
+    ]);
+  } catch (error) {
+    throw new NetworkError(String(error), { cause: error });
+  }
+  if (!tag) throw new Error("T3 Code has no nightly release.");
+  gitOverNetwork(checkout, "fetch", "--no-tags", "upstream", `+refs/tags/${tag}:${T3_NIGHTLY}`);
+  const commit = git(checkout, "rev-parse", `${T3_NIGHTLY}^{commit}`);
+  git(checkout, "update-ref", T3_NIGHTLY, commit);
+  return { tag, commit };
+}
+
 function ensureCheckout(paths: ModPaths) {
   if (NodeFS.existsSync(paths.checkout)) return;
   NodeFS.mkdirSync(paths.home, { recursive: true });
@@ -490,7 +546,7 @@ function rebaseOntoUpstream(checkout: string, commitCount: number, logFd: number
     NodeFS.existsSync(
       git(checkout, "rev-parse", "--path-format=absolute", "--git-path", "rebase-merge"),
     );
-  let args = [...rerere, "rebase", "upstream/main"];
+  let args = [...rerere, "rebase", T3_NIGHTLY];
   // Each pass replays at least one commit, so a rebase that keeps stopping is stuck.
   for (let pass = 0; pass <= commitCount; pass++) {
     try {
@@ -504,7 +560,7 @@ function rebaseOntoUpstream(checkout: string, commitCount: number, logFd: number
     }
   }
   git(checkout, "rebase", "--abort");
-  throw new Error("The rebase onto upstream/main kept stopping without a conflict.");
+  throw new Error("The rebase onto T3 Nightly kept stopping without a conflict.");
 }
 
 async function update(paths: ModPaths, flags: { force: boolean; push: boolean; branch: string }) {
@@ -521,11 +577,12 @@ async function update(paths: ModPaths, flags: { force: boolean; push: boolean; b
   if (NodeFS.existsSync(paths.claudeToken)) {
     process.env.CLAUDE_CODE_OAUTH_TOKEN = NodeFS.readFileSync(paths.claudeToken, "utf8").trim();
   }
+  let skipped = false;
   try {
-    step("Fetching upstream and origin");
-    gitOverNetwork(checkout, "fetch", "upstream");
+    step("Fetching the latest T3 Nightly and origin");
+    const nightly = fetchLatestT3Nightly(checkout);
     gitOverNetwork(checkout, "fetch", "origin");
-    const upstream = git(checkout, "rev-parse", "upstream/main");
+    const upstream = nightly.commit;
     const origin = git(checkout, "rev-parse", `origin/${flags.branch}`);
     const last = NodeFS.existsSync(paths.lastPublished)
       ? (JSON.parse(NodeFS.readFileSync(paths.lastPublished, "utf8")) as {
@@ -535,14 +592,15 @@ async function update(paths: ModPaths, flags: { force: boolean; push: boolean; b
       : undefined;
     if (!flags.force && last?.upstream === upstream && last.head === origin) {
       step(`Nothing changed since ${last.head.slice(0, 12)}; skipping the build`);
+      skipped = true;
       return;
     }
 
-    step(`Rebasing origin/${flags.branch} onto upstream/main`);
+    step(`Rebasing origin/${flags.branch} onto T3 Nightly ${nightly.tag}`);
     git(checkout, "reset", "--hard");
     git(checkout, "clean", "-fd");
     git(checkout, "checkout", "--detach", origin);
-    const modCommits = Number(git(checkout, "rev-list", "--count", `upstream/main..${origin}`));
+    const modCommits = Number(git(checkout, "rev-list", "--count", `${T3_NIGHTLY}..${origin}`));
     rebaseOntoUpstream(checkout, modCommits, logFd);
 
     step("Installing dependencies");
@@ -581,12 +639,12 @@ async function update(paths: ModPaths, flags: { force: boolean; push: boolean; b
     const files = packageUpdate(app, release.version, paths.release);
 
     step(`Publishing ${release.tag}`);
-    const mods = git(checkout, "log", "--format=- %s", "upstream/main..HEAD");
+    const mods = git(checkout, "log", "--format=- %s", `${T3_NIGHTLY}..HEAD`);
     publishRelease({
       repository,
       release,
       target: head,
-      notes: `Upstream ${upstream.slice(0, 12)} with these mods:\n\n${mods || "- none"}`,
+      notes: `T3 Code ${nightly.tag} with these mods:\n\n${mods || "- none"}`,
       files,
     });
     NodeFS.writeFileSync(
@@ -594,16 +652,25 @@ async function update(paths: ModPaths, flags: { force: boolean; push: boolean; b
       JSON.stringify({ upstream, head, version: release.version }, null, 2),
     );
     step(`Published ${release.version}. T3 Code will offer it as an update.`);
+    try {
+      pruneReleases(repository);
+    } catch (error) {
+      NodeFS.writeSync(logFd, `\nCould not delete old releases: ${error}\n`);
+    }
   } catch (error) {
     NodeFS.writeSync(logFd, `\n${error instanceof Error ? error.stack : String(error)}\n`);
-    notify(
-      error instanceof RebaseConflictError
-        ? `${error.message} Nothing was changed.`
-        : `The mod build failed. Log: ${logPath}`,
-    );
+    if (!(error instanceof NetworkError)) {
+      notify(
+        error instanceof RebaseConflictError
+          ? `${error.message} Nothing was changed.`
+          : `The mod build failed. Log: ${logPath}`,
+      );
+    }
     throw error;
   } finally {
     NodeFS.closeSync(logFd);
+    // Most half-hourly checks find nothing new, and their logs would pile up.
+    if (skipped) NodeFS.rmSync(logPath);
   }
 }
 
@@ -642,13 +709,8 @@ function installSchedule(paths: ModPaths) {
   </array>
   <key>RunAtLoad</key>
   <true/>
-  <key>StartCalendarInterval</key>
-  <dict>
-    <key>Hour</key>
-    <integer>${SCHEDULE_HOUR}</integer>
-    <key>Minute</key>
-    <integer>0</integer>
-  </dict>
+  <key>StartInterval</key>
+  <integer>${SCHEDULE_INTERVAL_SECONDS}</integer>
   <key>StandardOutPath</key>
   <string>${xml(NodePath.join(paths.logs, "schedule.log"))}</string>
   <key>StandardErrorPath</key>
@@ -660,7 +722,9 @@ function installSchedule(paths: ModPaths) {
   const domain = `gui/${process.getuid?.()}`;
   NodeChildProcess.spawnSync("launchctl", ["bootout", `${domain}/${SCHEDULE_LABEL}`]);
   run("launchctl", ["bootstrap", domain, plist]);
-  console.log(`Scheduled ${paths.checkout} to update daily at ${SCHEDULE_HOUR}:00 (${plist}).`);
+  console.log(
+    `Scheduled ${paths.checkout} to check every ${SCHEDULE_INTERVAL_SECONDS / 60} minutes (${plist}).`,
+  );
 }
 
 if (import.meta.main) {
